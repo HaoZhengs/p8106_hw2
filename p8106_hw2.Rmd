@@ -1,0 +1,97 @@
+---
+title: "p8106_hw2"
+author: "Hao Zheng(hz2770)"
+date: "2022/3/5"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+```
+
+```{r, warning = FALSE}
+# Data Cleaning
+dat = 
+  read.csv("./data/college.csv")[-1] %>% 
+  janitor::clean_names() %>% 
+  na.omit()
+
+# Data Partition
+indexTrain <- createDataPartition(y = dat$outstate, p = 0.8, list = FALSE)
+trainData <- dat[indexTrain,]
+testData <- dat[-indexTrain,]
+head(trainData)
+```
+
+
+## Exploratory Data Analysis
+```{r}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
+theme1$plot.symbol$psh <- 16
+theme1$plot.line$col <- rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd <- 2
+theme1$strip.background$col <- rgb(.0, .2, .6, .2)
+trellis.par.set(theme1)
+
+x <- dat %>% select(-outstate)
+y <- dat$outstate
+
+# scatter plot
+featurePlot(x,
+            y,
+            plot = "scatter",
+            span = .5,
+            labels = c("Predictors", "outstate"),
+            type = c("p", "smooth"),
+            layout = c(4,4))
+```
+
+From the scatter plot, we can see that most predictors are not linearly associated with the response variable. However, there may exist a linear relationship between the variable `perc_alumni`, `grad_rate`, `room_board` and the response `outstate` respectively.
+
+
+## Smoothing Spline Models
+Now let's fit smoothing spline models using `terminal` as the only predictor of `outstate`.
+```{r}
+terminal.grid <- seq(from = 40, to = 100, by = 10)
+fit.ss <- smooth.spline(trainData$terminal, trainData$outstate)
+fit.ss$df
+fit.ss$lambda
+
+pred.ss <- predict(fit.ss,
+                   x = terminal.grid)
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         terminal = terminal.grid)
+
+# plot the fit
+p <- ggplot(data = trainData, aes(x = terminal, y = outstate)) + 
+  geom_point(color = rgb(.2, .4, .2, .5))
+
+p + 
+  geom_line(aes(x = terminal.grid, y = pred), data = pred.ss.df, color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+The smoothing spline model fitted for a range of degrees of freedom is `r fit.ss$df`. Then obtain the degrees of freedom using generalized cross-validation and plot the new fits.
+```{r}
+fit.ss.cv <- smooth.spline(trainData$terminal, trainData$outstate, cv = TRUE)
+fit.ss.cv$df
+fit.ss.cv$lambda
+
+pred.ss.cv <- predict(fit.ss.cv,
+                      x = terminal.grid)
+pred.ss.df.cv <- data.frame(pred = pred.ss.cv$y,
+                            terminal = terminal.grid)
+
+p + 
+  geom_line(aes(x = terminal.grid, y = pred), data = pred.ss.df.cv, color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+Using cross-validation, we obtain the degrees of freedom `r fit.ss.cv$df` with lambda = `r fit.ss.cv$lambda`.
+
+## Generalized Additive Models (GAM)
+
+## Multivariate Adaptive Regression Spline (MARS)
+
+## Model Selection
