@@ -36,8 +36,8 @@ theme1$plot.line$lwd <- 2
 theme1$strip.background$col <- rgb(.0, .2, .6, .2)
 trellis.par.set(theme1)
 
-x <- dat %>% select(-outstate)
-y <- dat$outstate
+x <- trainData %>% select(-outstate)
+y <- trainData$outstate
 
 # scatter plot
 featurePlot(x,
@@ -91,7 +91,71 @@ p +
 Using cross-validation, we obtain the degrees of freedom `r fit.ss.cv$df` with lambda = `r fit.ss.cv$lambda`.
 
 ## Generalized Additive Models (GAM)
+Fit GAM model with all the predictors.
+```{r}
+set.seed(2022)
+ctrl = trainControl(method = "cv", number = 10)
+
+model.gam <- train(x, y,
+                 method = "gam",
+                 tuneGrid = data.frame(method = "GCV.Cp",
+                                       select = TRUE),
+                 trControl = ctrl)
+model.gam$finalModel
+
+plot(model.gam$finalModel)
+```
+
+```{r}
+test_x = testData %>% select(-outstate)
+
+gam.pred <- predict(model.gam, newdata = test_x)
+
+test_error_gam = mean((gam.pred - testData$outstate)^2)
+test_error_gam
+```
+
+The test error for the GAM model is `r test_error_gam`.
 
 ## Multivariate Adaptive Regression Spline (MARS)
+```{r}
+set.seed(2022)
+
+model.mars <- train(x,y,
+                    method = "earth",
+                    tuneGrid = expand.grid(degree = 1:3,
+                                           nprune = 2:25),
+                    trControl = ctrl)
+plot(model.mars)
+
+model.mars$bestTune
+
+coef(model.mars$finalModel)
+```
+
+Then we calculate the test error on the test data.
+```{r}
+mars.pred <- predict(model.mars, newdata = test_x)
+
+test_error_mars = mean((mars.pred - testData$outstate)^2)
+test_error_mars
+```
+
+The test error is `r test_error_mars`.
 
 ## Model Selection
+
+```{r}
+set.seed(2022)
+model.lm <- train(x, y,
+                  method = "lm",
+                  trControl = ctrl)
+
+resamp <- resamples(list(MARS = model.mars,
+                         LM = model.lm))
+summary(resamp)
+
+bwplot(resamp, metric = "RMSE")
+```
+
+The MARS model has far less RMSE than the linear model, so we prefer the use of model MARS.
