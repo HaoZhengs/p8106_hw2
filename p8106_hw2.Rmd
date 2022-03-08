@@ -9,6 +9,9 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(caret)
+library(mgcv)
+library(nlme)
+library(gridExtra)
 ```
 
 ```{r, warning = FALSE}
@@ -51,12 +54,11 @@ featurePlot(x,
 
 From the scatter plot, we can see that most predictors are not linearly associated with the response variable. However, there may exist a linear relationship between the variable `perc_alumni`, `grad_rate`, `room_board` and the response `outstate` respectively.
 
-
 ## Smoothing Spline Models
 Now let's fit smoothing spline models using `terminal` as the only predictor of `outstate`.
 ```{r}
-terminal.grid <- seq(from = 40, to = 100, by = 10)
-fit.ss <- smooth.spline(trainData$terminal, trainData$outstate)
+terminal.grid <- seq(from = 40, to = 100, by = 1)
+fit.ss <- smooth.spline(trainData$terminal, trainData$outstate, cv = TRUE)
 fit.ss$df
 fit.ss$lambda
 
@@ -73,22 +75,32 @@ p +
   geom_line(aes(x = terminal.grid, y = pred), data = pred.ss.df, color = rgb(.8, .1, .1, 1)) + theme_bw()
 ```
 
-The smoothing spline model fitted for a range of degrees of freedom is `r fit.ss$df`. Then obtain the degrees of freedom using generalized cross-validation and plot the new fits.
+The optimal smoothing spline model fitted using the degrees of freedom obtained by generalized cross validation is as above with degrees of freedom `r fit.ss$df`. As we can see from the plot, the smoothing spline obtained is quite smooth and fits the data quite well.
+
+Then we also try to fit the model for a range of degrees of freedom to observe the underlying pattern.
+
 ```{r}
-fit.ss.cv <- smooth.spline(trainData$terminal, trainData$outstate, cv = TRUE)
-fit.ss.cv$df
-fit.ss.cv$lambda
+# Write a function about it
+ss.func <- function(degree){
+  fit.ss <- smooth.spline(trainData$terminal, trainData$outstate, df = degree)
+  pred.ss <- predict(fit.ss,
+                     x = terminal.grid)
+  pred.ss.df <- data.frame(pred = pred.ss$y,
+                           terminal = terminal.grid,
+                           df = degree)
+}
 
-pred.ss.cv <- predict(fit.ss.cv,
-                      x = terminal.grid)
-pred.ss.df.cv <- data.frame(pred = pred.ss.cv$y,
-                            terminal = terminal.grid)
+ss.list <- list()
+for (i in 2:15) {
+  ss.list <- rbind(ss.list, ss.func(i))
+}
+ss.data <- as.data.frame(ss.list)
 
-p + 
-  geom_line(aes(x = terminal.grid, y = pred), data = pred.ss.df.cv, color = rgb(.8, .1, .1, 1)) + theme_bw()
+p +
+  geom_line(aes(x = terminal, y = pred, group = df, color = df), data = ss.data)
 ```
 
-Using cross-validation, we obtain the degrees of freedom `r fit.ss.cv$df` with lambda = `r fit.ss.cv$lambda`.
+From the plot of smoothing spline fit with different degrees of freedom, we can see that when the degrees of freedom is small, the fitted line is quite linear, and it gets more and more wiggly as degrees of freedom increase.
 
 ## Generalized Additive Models (GAM)
 Fit GAM model with all the predictors.
@@ -102,10 +114,17 @@ model.gam <- train(x, y,
                                        select = TRUE),
                  trControl = ctrl)
 model.gam$finalModel
+summary(model.gam)
+```
 
+According to the p value, some predictors may not be significant in the GAM model, such as `terminal`, `top25perc` and `p_undergrad`. The deviance explained by the model is 85.3%, adjusted R-squared value is 0.833, which is quite close to 1. The GAM model fits the data quite well.
+
+The plots of each predictor against the response variable are as below.
+```{r}
 plot(model.gam$finalModel)
 ```
 
+Now let's calculate the test error of the GAM model.
 ```{r}
 test_x = testData %>% select(-outstate)
 
@@ -129,9 +148,11 @@ model.mars <- train(x,y,
 plot(model.mars)
 
 model.mars$bestTune
-
+summary(model.mars$finalModel)
 coef(model.mars$finalModel)
 ```
+
+The final model uses 2 product degree and `nprune` = 16. 13 terms are selected of 33 terms among 9 of the 16 predictors. The predictors `expend`, `room_board`, `perc_alumni` and `accept` are of the most importance.
 
 Then we calculate the test error on the test data.
 ```{r}
@@ -143,8 +164,18 @@ test_error_mars
 
 The test error is `r test_error_mars`.
 
-## Model Selection
+```{r}
+# Perform partial dependency plot.
+p1 <- pdp::partial(model.mars, pred.var = c("grad_rate"), grid.resolution = 10) %>% autoplot()
+p2 <- pdp::partial(model.mars, pred.var = c("grad_rate","accept"), grid.resolution = 10) %>% 
+  pdp::plotPartial(levelplot = FALSE, zlab = "yhat", drape = TRUE, screen = list(z = 20, x = -60))
 
+grid.arrange(p1, p2, ncol = 2)
+```
+
+We present two partial dependency plot here, the left one is for `grad_rate` while the right one is for both variables `grad_rate` and `accept`.
+
+## Model Selection
 ```{r}
 set.seed(2022)
 model.lm <- train(x, y,
@@ -158,4 +189,4 @@ summary(resamp)
 bwplot(resamp, metric = "RMSE")
 ```
 
-The MARS model has far less RMSE than the linear model, so we prefer the use of model MARS.
+As we learned in the class, final model selection should be based on our cross-validation results. Since the MARS model has far less RMSE than the linear model, so we prefer the use of model MARS when predicting the out-of-state tuition.
